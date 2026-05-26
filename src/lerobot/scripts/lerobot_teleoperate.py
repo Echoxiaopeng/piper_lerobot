@@ -30,6 +30,9 @@ lerobot-teleoperate \
     --teleop.id=blue \
     --display_data=true
 ```
+python3 lerobot_teleoperate.py\
+    --robot.type=piper_follower\
+    --teleop.type=keyboard_ee
 
 Example teleoperation with bimanual so100:
 
@@ -82,6 +85,7 @@ from lerobot.robots import (  # noqa: F401
     reachy2,
     so_follower,
     unitree_g1 as unitree_g1_robot,
+    piper_follower,
 )
 from lerobot.teleoperators import (  # noqa: F401
     Teleoperator,
@@ -99,6 +103,7 @@ from lerobot.teleoperators import (  # noqa: F401
     reachy2_teleoperator,
     so_leader,
     unitree_g1,
+    pika
 )
 from lerobot.utils.import_utils import register_third_party_plugins
 from lerobot.utils.robot_utils import precise_sleep
@@ -222,7 +227,9 @@ def teleoperate(cfg: TeleoperateConfig):
     teleop_action_processor, robot_action_processor, robot_observation_processor = make_default_processors()
 
     teleop.connect()
-    robot.connect()
+    if not robot.is_connected:
+        robot.connect()
+    # robot.connect()
 
     try:
         teleop_loop(

@@ -99,6 +99,13 @@ def make_teleoperator_from_config(config: TeleoperatorConfig) -> "Teleoperator":
         from .openarm_mini import OpenArmMini
 
         return OpenArmMini(config)
+    # 新增加pika遥操作手柄
+    elif config.type == "pika":
+        from .pika.teleop_pika import PikaTeleop
+
+        return PikaTeleop(config)
+    
+
     else:
         try:
             return cast("Teleoperator", make_device_from_device_class(config))
