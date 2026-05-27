@@ -1713,3 +1713,79 @@ class IdentityProcessorStep(ProcessorStep):
     ) -> dict[PipelineFeatureType, dict[str, PolicyFeature]]:
         """Returns the features without modification."""
         return features
+
+# 添加teleop——pika的数据处理函数，将其转换为关节角
+from lerobot.robots.piper_follower.piper_IK.forward_inverse_kinematics import Arm_IK, Arm_FK, create_transformation_matrix
+import numpy as np
+import pinocchio as pin
+class PiperIKProcessorStep(ProcessorStep):
+    """
+    ✨ 完美顶替 IdentityProcessorStep 的超级加工步！
+    """
+    def __init__(self):
+        self.fk_solver = Arm_FK()
+        self.ik_solver = Arm_IK()
+        self.is_first_frame = True
+        self.arm_end_pose_matrix = None
+        self.localization_pose_matrix = None
+
+    def __call__(self, transition: dict) -> dict:
+        """
+        1. 拦截并加工高频的数据大字典
+        """
+        # 提取 Pika 平铺的 16 维矩阵并恢复 4x4
+        # raw_pika_flat = transition["action"]["actions"].numpy()
+        
+        pika_data = transition[TransitionKey.ACTION]
+        pika_pos = pika_data['pika.pos']  # array([0., 0., 0.])
+        pika_rot = pika_data['pika.rot']  # array([0, 0, 0, 1])
+        quat = pin.Quaternion(
+            float(pika_rot[3]), # qw
+            float(pika_rot[0]), # qx
+            float(pika_rot[1]), # qy
+            float(pika_rot[2])  # qz
+        )
+        rotation_matrix = quat.matrix()
+        
+        # 组装成标准 4x4 齐次变换矩阵
+        current_pika_matrix = np.eye(4)
+        current_pika_matrix[:3, :3] = rotation_matrix
+        current_pika_matrix[:3, 3] = pika_pos
+
+        # 第一帧利用机械臂真实 obs 锁死零点
+        if self.is_first_frame:
+            obs_data = transition[TransitionKey.OBSERVATION]
+            current_joints = np.array([
+                obs_data['joint_1.pos'], obs_data['joint_2.pos'], obs_data['joint_3.pos'],
+                obs_data['joint_4.pos'], obs_data['joint_5.pos'], obs_data['joint_6.pos']
+            ])
+            xyzrpy = self.fk_solver.get_pose(current_joints)
+            self.arm_end_pose_matrix = create_transformation_matrix(*xyzrpy)
+            self.localization_pose_matrix = current_pika_matrix
+            self.is_first_frame = False
+
+        # 4. 灵魂矩阵变换
+        target_arm_matrix = np.dot(
+            self.arm_end_pose_matrix, 
+            np.dot(np.linalg.inv(self.localization_pose_matrix), current_pika_matrix)
+        )
+
+        # 逆运动学解算出 6 维关节角度弧度
+        sol_q, _, _ = self.ik_solver.ik_fun(target_pose=target_arm_matrix, gripper=0.0)
+        for i in range(1, 7):
+            transition["action"][f"joint_{i}.pos"] = sol_q[i-1]
+        transition["action"]["gripper.pos"] = 0.0
+        # 🌟 关键：把算出来的关节角覆盖进去，完成“翻译”
+        # transition["action"]["actions"] = torch.from_numpy(sol_q).float()
+        
+        return transition
+
+    def transform_features(self, features: dict) -> dict:
+        """
+        2. 🚨 强行修改特征声明！告诉后面的关卡：动作已经被我从 16 维洗成 6 维了！
+        """
+        # 找到动作特征里声明形状的地方，强行改成机械臂的 6 轴
+        if "action" in features and "actions" in features["action"]:
+            features["action"]["actions"].shape = (6,)
+            
+        return features

@@ -22,19 +22,27 @@ from .converters import (
     transition_to_observation,
     transition_to_robot_action,
 )
-from .pipeline import IdentityProcessorStep, RobotProcessorPipeline
+from .pipeline import IdentityProcessorStep, RobotProcessorPipeline, PiperIKProcessorStep
 
 
+# def make_default_teleop_action_processor() -> RobotProcessorPipeline[
+#     tuple[RobotAction, RobotObservation], RobotAction
+# ]:
+#     teleop_action_processor = RobotProcessorPipeline[tuple[RobotAction, RobotObservation], RobotAction](
+#         steps=[IdentityProcessorStep()],
+#         to_transition=robot_action_observation_to_transition,
+#         to_output=transition_to_robot_action,
+#     )
+#     return teleop_action_processor
 def make_default_teleop_action_processor() -> RobotProcessorPipeline[
     tuple[RobotAction, RobotObservation], RobotAction
 ]:
     teleop_action_processor = RobotProcessorPipeline[tuple[RobotAction, RobotObservation], RobotAction](
-        steps=[IdentityProcessorStep()],
+        steps=[PiperIKProcessorStep()],
         to_transition=robot_action_observation_to_transition,
         to_output=transition_to_robot_action,
     )
     return teleop_action_processor
-
 
 def make_default_robot_action_processor() -> RobotProcessorPipeline[
     tuple[RobotAction, RobotObservation], RobotAction

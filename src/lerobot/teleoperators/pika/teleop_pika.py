@@ -110,6 +110,8 @@ class PikaTeleop(Teleoperator):
             pose_data = self.pika.get_pose("T20")
             if pose_data is None:
                 return {"pika.pos": np.zeros(3), "pika.rot": np.array([0,0,0,1]), "pika.timestamp": time.time()}
+            
+            #  pose_xyzrpy = matrix_to_xyzrpy(np.dot(self.arm_end_pose_matrix, np.dot(np.linalg.inv(self.localization_pose_matrix), matrix)))
 
             return {
                 "pika.pos": np.array(pose_data.position, dtype=np.float32),
