@@ -17,6 +17,7 @@ from ..utils import TeleopEvents
 from .configuration_pika import PikaTeleopConfig
 
 from pika.tracker import ViveTracker
+from pika.sense import Sense
 import numpy as np
 
 
@@ -44,6 +45,7 @@ class PikaTeleop(Teleoperator):
         self.is_connected_pika = False
 
         self.pika = ViveTracker()
+        self.sense_gripper = Sense()
 
     @property
     def action_features(self) -> dict:
@@ -77,6 +79,12 @@ class PikaTeleop(Teleoperator):
         else:
             logging.error("Pika 连接失败，请检查硬件或驱动。")
 
+        is_connected_sense = self.sense_gripper.connect()
+        if is_connected_sense:
+            logging.info("Sense 连接成功，后台追踪线程已启动。")
+        else:
+            logging.error("Sense 连接失败，请检查硬件或驱动。")
+
 
 
 
@@ -94,29 +102,19 @@ class PikaTeleop(Teleoperator):
 
     def configure(self):
         pass
-
-    # @check_if_not_connected
-    # def get_action(self) -> RobotAction:
-
-    #     poses = self.pika.get_pose()
-
-
-
-
-    #     return dict.fromkeys(action, None)
     
     @check_if_not_connected
     def get_action(self) -> RobotAction:
             pose_data = self.pika.get_pose("T20")
+            gripper = self.sense_gripper.get_gripper_distance()
             if pose_data is None:
-                return {"pika.pos": np.zeros(3), "pika.rot": np.array([0,0,0,1]), "pika.timestamp": time.time()}
+                return {"pika.pos": np.zeros(3), "pika.rot": np.array([0,0,0,1]), "pika.timestamp": time.time(),"pika.gripper": 0}
             
-            #  pose_xyzrpy = matrix_to_xyzrpy(np.dot(self.arm_end_pose_matrix, np.dot(np.linalg.inv(self.localization_pose_matrix), matrix)))
-
             return {
                 "pika.pos": np.array(pose_data.position, dtype=np.float32),
                 "pika.rot": np.array(pose_data.rotation, dtype=np.float32),
-                "pika.timestamp": float(pose_data.timestamp)
+                "pika.timestamp": float(pose_data.timestamp),
+                "pika.gripper": float(gripper)
             }
 
     def send_feedback(self, feedback: dict[str, Any]) -> None:

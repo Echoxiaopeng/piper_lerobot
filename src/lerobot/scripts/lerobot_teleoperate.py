@@ -173,12 +173,13 @@ def teleop_loop(
 
         # Get teleop action
         raw_action = teleop.get_action()
-
+        print(f"pika raw_action:{raw_action["pika.pos"]}")
         # Process teleop action through pipeline
         teleop_action = teleop_action_processor((raw_action, obs))
 
         # Process action for robot through pipeline
         robot_action_to_send = robot_action_processor((teleop_action, obs))
+        # print(f"robot_action_to_send_pos：{robot_action_to_send['pika.pos']}, robot_action_to_send_rot：{robot_action_to_send['pika.rot']}")
 
         # Send processed action to robot (robot_action_processor.to_output should return RobotAction)
         _ = robot.send_action(robot_action_to_send)
@@ -225,8 +226,9 @@ def teleoperate(cfg: TeleoperateConfig):
     teleop = make_teleoperator_from_config(cfg.teleop)
     robot = make_robot_from_config(cfg.robot)
     teleop_action_processor, robot_action_processor, robot_observation_processor = make_default_processors()
-
+    
     teleop.connect()
+    print(f"robot is connected:{robot.is_connected}")
     if not robot.is_connected:
         robot.connect()
     # robot.connect()

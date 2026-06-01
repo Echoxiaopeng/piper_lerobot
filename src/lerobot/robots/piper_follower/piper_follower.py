@@ -13,6 +13,9 @@ from lerobot.motors.piper.piper import PiperMotorsBus, PiperMotorsBusConfig
 from ..robot import Robot
 from .config_piper_follower import PIPERFollowerConfig
 import numpy as np
+# 添加pika的夹爪
+from pika.gripper import Gripper
+
 logger = logging.getLogger(__name__)
 
 def get_motor_names(arm: dict[str, Any]) -> list[str]:
@@ -43,6 +46,8 @@ class PIPERFollower(Robot):
         self._is_connected = False
         self._is_calibrated = False
         self.cameras = make_cameras_from_configs(config.cameras)
+        # 实例化夹爪
+        self.gripper = Gripper()
 
     @property
     def camera_features(self) -> dict:
@@ -104,7 +109,8 @@ class PIPERFollower(Robot):
     @property
     def is_connected(self) -> bool:
         """机器人和所有相机是否都已连接"""
-        return all(cam.is_connected for cam in self.cameras.values())
+
+        return all(cam.is_connected for cam in self.cameras.values()) and self._is_connected
 
     @property
     def is_calibrated(self) -> bool:
@@ -123,13 +129,16 @@ class PIPERFollower(Robot):
     @check_if_already_connected
     def connect(self) -> None:
         """Connect piper and cameras"""
-        logger.info(f"Connecting arm on {self.config.port}...")
-        # if self._is_connected:
-        #     raise DeviceAlreadyConnectedError(
-        #         "Piper is already connected. Do not run robot.connect() twice."
-        #    
-        self.bus.connect(enable=True)
-        print("piper follower connected")
+        # logger.info(f"Connecting arm on {self.config.port}...")
+
+        piper_connected = self.bus.connect(enable=True)
+        if piper_connected:
+            print("piper follower connected")
+
+
+        gripper_connected = self.gripper.connect()
+        if gripper_connected:
+            print("piper follower connected")
 
         # connect cameras
         for name in self.cameras:
@@ -168,10 +177,14 @@ class PIPERFollower(Robot):
         """Capture current joint positions and camera images"""
         # if not self._is_connected:
         #     raise DeviceNotConnectedError("Piper is not connected. Run `robot.connect()` first.")
+        
+        # 获取夹爪角度
+        gripper_joint = self.gripper.get_gripper_distance()
 
         # 读取关节状态
         state = self.bus.read()  # e.g., {'joint_1': 0.1, ..., 'gripper': 0.0}
         obs_dict = {f"{joint}.pos": float(val) for joint, val in state.items()}
+        obs_dict["gripper"] = gripper_joint
         print(f"obs_dict:{obs_dict}")
 
         # 读取图像
@@ -210,10 +223,6 @@ class PIPERFollower(Robot):
 
     def send_action(self, action: dict[str, float]) -> dict[str, float]:
         """Receive action dict from teleop/record and send to motor"""
-#
-# {'pika.pos': array([ 0.99986976, -1.6976209 ,  0.09184094], dtype=float32), 
-# 'pika.rot': array([-0.09793922,  0.41675383,  0.18225048,  0.8851604 ], 
-# dtype=float32), 'pika.timestamp': 1779792832.32427}
 
         motor_order = [
             "joint_1",
@@ -226,7 +235,7 @@ class PIPERFollower(Robot):
         ]
 
         # DEBUG
-        print("Incoming action:", action)
+        # print("Incoming action:", action)
 
         # 当前状态
         current_state = self.bus.read()
@@ -239,7 +248,7 @@ class PIPERFollower(Robot):
 
         print("Target joints:", target_joints)
 
-        self.bus.write(target_joints)
+        # self.bus.write(target_joints)
 
         return {
             f"{motor}.pos": pos

@@ -20,8 +20,8 @@ class PiperMotorsBus:
         self.piper.ConnectPort()
         self.motors = config.motors
         # 录制数据集时改成0
-        self.init_joint_position = [0.0, 0.0, 0.0, 0.0, 0.52, 0.0, 0.0] # [6 joints + 1 gripper] * 0.0
-        self.safe_disable_position = [0.0, 0.0, 0.0, 0.0, 0.52, 0.0, 0.0]
+        self.init_joint_position = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] # [6 joints + 1 gripper] * 0.0
+        self.safe_disable_position = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         self.pose_factor = 1000 # 单位 0.001mm
         self.joint_factor = 57324.840764 # 1000*180/3.14， rad -> 度（单位0.001度）
 
@@ -84,6 +84,11 @@ class PiperMotorsBus:
             time.sleep(0.5)
         resp = enable_flag
         print(f"Returning response: {resp}")
+        # init_read = self.read()
+        # list_init_read = list(init_read.values())
+        # import math
+        # list_init_read_degrees = [math.degrees(i) for i in list_init_read]
+        # self.write(list_init_read)
         return resp
 
     def set_calibration(self):
@@ -106,28 +111,30 @@ class PiperMotorsBus:
         
 
     def write(self, target_joint:list):
-        """
-            Joint control
-            - target joint: in radians
-                joint_1 (float): 关节1角度 -92000 ~ 92000 / 57324.840764
-                joint_2 (float): 关节2角度 -2400 ~ 120000 / 57324.840764
-                joint_3 (float): 关节3角度 3000 ~ -110000 / 57324.840764
-                joint_4 (float): 关节4角度 -90000 ~ 90000 / 57324.840764
-                joint_5 (float): 关节5角度 80000 ~ -80000 / 57324.840764
-                joint_6 (float): 关节6角度 -90000 ~ 90000 / 57324.840764
-                gripper_range: 夹爪角度 0~0.08
-        """
-        joint_0 = round(target_joint[0]*self.joint_factor)
-        joint_1 = round(target_joint[1]*self.joint_factor)
-        joint_2 = round(target_joint[2]*self.joint_factor)
-        joint_3 = round(target_joint[3]*self.joint_factor)
-        joint_4 = round(target_joint[4]*self.joint_factor)
-        joint_5 = round(target_joint[5]*self.joint_factor)
+        '''
+        |joint_name|     limit(rad)       |    limit(angle)    |
+        |----------|     ----------       |     ----------     |
+        |joint1    |   [-2.6179, 2.6179]  |    [-150.0, 150.0] |
+        |joint2    |   [0, 3.14]          |    [0, 180.0]      |
+        |joint3    |   [-2.967, 0]        |    [-170, 0]       |
+        |joint4    |   [-1.745, 1.745]    |    [-100.0, 100.0] |
+        |joint5    |   [-1.22, 1.22]      |    [-70.0, 70.0]   |
+        |joint6    |   [-2.09439, 2.09439]|    [-120.0, 120.0] |
+        '''
+        # input 是正常的弧度（rad）
+        # 将弧度 转成 度 * 1000倍
+        # round(i / 0.0174533 * 1e3)
+        joint_0 = round(target_joint[0] / 0.0174533 * 1e3)
+        joint_1 = round(target_joint[1] / 0.0174533 * 1e3)
+        joint_2 = round(target_joint[2] / 0.0174533 * 1e3)
+        joint_3 = round(target_joint[3] / 0.0174533 * 1e3)
+        joint_4 = round(target_joint[4] / 0.0174533 * 1e3)
+        joint_5 = round(target_joint[5] / 0.0174533 * 1e3)
         gripper_range = round(target_joint[6]*1000*1000)
         
         self.piper.MotionCtrl_2(0x01, 0x01, 100, 0x00)
         self.piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
-        self.piper.GripperCtrl(abs(gripper_range), 1000, 0x01, 0) # 单位 0.001°
+        # self.piper.GripperCtrl(abs(gripper_range), 1000, 0x01, 0) # 单位 0.001°
 
     def read(self) -> Dict:
         """
@@ -137,16 +144,18 @@ class PiperMotorsBus:
         joint_msg = self.piper.GetArmJointMsgs()
         joint_state = joint_msg.joint_state
 
+        # 将读取到的 度*1000 转换到 弧度（rad）
+        joint_state = tuple(getattr(joint_state, f"joint_{i+1}") / 1e3 * 0.0174533 for i in range(6))
         gripper_msg = self.piper.GetArmGripperMsgs()
         gripper_state = gripper_msg.gripper_state
 
         return {
-            "joint_1": joint_state.joint_1,
-            "joint_2": joint_state.joint_2,
-            "joint_3": joint_state.joint_3,
-            "joint_4": joint_state.joint_4,
-            "joint_5": joint_state.joint_5,
-            "joint_6": joint_state.joint_6,
+            "joint_1": joint_state[0],
+            "joint_2": joint_state[1],
+            "joint_3": joint_state[2],
+            "joint_4": joint_state[3],
+            "joint_5": joint_state[4],
+            "joint_6": joint_state[5],
             "gripper": gripper_state.grippers_angle
         }
 

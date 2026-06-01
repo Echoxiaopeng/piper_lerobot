@@ -51,7 +51,7 @@ from lerobot.utils.constants import HF_LEROBOT_HOME
 from lerobot.utils.hub import HubMixin
 
 from .converters import batch_to_transition, create_transition, transition_to_batch
-
+from transformations import quaternion_from_euler
 # Generic type variables for pipeline input and output.
 TInput = TypeVar("TInput")
 TOutput = TypeVar("TOutput")
@@ -1718,9 +1718,46 @@ class IdentityProcessorStep(ProcessorStep):
 from lerobot.robots.piper_follower.piper_IK.forward_inverse_kinematics import Arm_IK, Arm_FK, create_transformation_matrix
 import numpy as np
 import pinocchio as pin
+import math
+def matrix_to_xyzrpy(matrix):
+    x = matrix[0, 3]
+    y = matrix[1, 3]
+    z = matrix[2, 3]
+    roll = math.atan2(matrix[2, 1], matrix[2, 2])
+    pitch = math.asin(-matrix[2, 0])
+    yaw = math.atan2(matrix[1, 0], matrix[0, 0])
+    return [x, y, z, roll, pitch, yaw]
+
+def create_transformation_matrix(x, y, z, roll, pitch, yaw):
+    transformation_matrix = np.eye(4)
+    A = np.cos(yaw)
+    B = np.sin(yaw)
+    C = np.cos(pitch)
+    D = np.sin(pitch)
+    E = np.cos(roll)
+    F = np.sin(roll)
+    DE = D * E
+    DF = D * F
+    transformation_matrix[0, 0] = A * C
+    transformation_matrix[0, 1] = A * DF - B * E
+    transformation_matrix[0, 2] = B * F + A * DE
+    transformation_matrix[0, 3] = x
+    transformation_matrix[1, 0] = B * C
+    transformation_matrix[1, 1] = A * E + B * DF
+    transformation_matrix[1, 2] = B * DE - A * F
+    transformation_matrix[1, 3] = y
+    transformation_matrix[2, 0] = -D
+    transformation_matrix[2, 1] = C * F
+    transformation_matrix[2, 2] = C * E
+    transformation_matrix[2, 3] = z
+    transformation_matrix[3, 0] = 0
+    transformation_matrix[3, 1] = 0
+    transformation_matrix[3, 2] = 0
+    transformation_matrix[3, 3] = 1
+    return transformation_matrix
 class PiperIKProcessorStep(ProcessorStep):
     """
-    ✨ 完美顶替 IdentityProcessorStep 的超级加工步！
+    完美顶替 IdentityProcessorStep 的超级加工步！
     """
     def __init__(self):
         self.fk_solver = Arm_FK()
@@ -1728,6 +1765,9 @@ class PiperIKProcessorStep(ProcessorStep):
         self.is_first_frame = True
         self.arm_end_pose_matrix = None
         self.localization_pose_matrix = None
+
+        # 更新pika位姿标志位
+        self.refresh_localization_pose = True
 
     def __call__(self, transition: dict) -> dict:
         """
@@ -1739,18 +1779,14 @@ class PiperIKProcessorStep(ProcessorStep):
         pika_data = transition[TransitionKey.ACTION]
         pika_pos = pika_data['pika.pos']  # array([0., 0., 0.])
         pika_rot = pika_data['pika.rot']  # array([0, 0, 0, 1])
-        quat = pin.Quaternion(
-            float(pika_rot[3]), # qw
-            float(pika_rot[0]), # qx
-            float(pika_rot[1]), # qy
-            float(pika_rot[2])  # qz
-        )
-        rotation_matrix = quat.matrix()
-        
-        # 组装成标准 4x4 齐次变换矩阵
-        current_pika_matrix = np.eye(4)
-        current_pika_matrix[:3, :3] = rotation_matrix
-        current_pika_matrix[:3, 3] = pika_pos
+
+        # print(f"pipeline pika pos:{pika_pos}")
+        current_pika_matrix = pin.SE3(
+                pin.Quaternion(float(pika_rot[3]), float(pika_rot[0]), float(pika_rot[1]), float(pika_rot[2])),
+                pika_pos
+            )
+
+
 
         # 第一帧利用机械臂真实 obs 锁死零点
         if self.is_first_frame:
@@ -1759,33 +1795,64 @@ class PiperIKProcessorStep(ProcessorStep):
                 obs_data['joint_1.pos'], obs_data['joint_2.pos'], obs_data['joint_3.pos'],
                 obs_data['joint_4.pos'], obs_data['joint_5.pos'], obs_data['joint_6.pos']
             ])
-            xyzrpy = self.fk_solver.get_pose(current_joints)
-            self.arm_end_pose_matrix = create_transformation_matrix(*xyzrpy)
-            self.localization_pose_matrix = current_pika_matrix
+            current_xyzrpy = self.fk_solver.get_pose(current_joints)
+            self.arm_end_pose_matrix = create_transformation_matrix(*current_xyzrpy)
             self.is_first_frame = False
 
-        # 4. 灵魂矩阵变换
+        # 刚开始，将pika的初始值记录下来
+        if self.refresh_localization_pose:
+            self.localization_pose_matrix = current_pika_matrix.homogeneous
+            self.refresh_localization_pose = False
+            print("进入refresh_localization_pose")
+
+        # 4. 矩阵变换
+        # 这个localization_pose_matrix和arm_end_pose_matrix，只有在开头第一次才会改变
         target_arm_matrix = np.dot(
             self.arm_end_pose_matrix, 
-            np.dot(np.linalg.inv(self.localization_pose_matrix), current_pika_matrix)
+            np.dot(np.linalg.inv(self.localization_pose_matrix), current_pika_matrix.homogeneous)
         )
+
+        target_arm_xyzrpy = matrix_to_xyzrpy(target_arm_matrix)
+
 
         # 逆运动学解算出 6 维关节角度弧度
         sol_q, _, _ = self.ik_solver.ik_fun(target_pose=target_arm_matrix, gripper=0.0)
+
+        xyzrpy = self.ik_solver.get_pose(sol_q[:6])
+
+        # print(f"target_arm_xyzrpy:{xyzrpy[0]:.3f}")
+        diffX = abs(target_arm_xyzrpy[0] - xyzrpy[0])
+        diffY = abs(target_arm_xyzrpy[1] - xyzrpy[1])
+        diffZ = abs(target_arm_xyzrpy[2] - xyzrpy[2])
+        diffRoll = abs(target_arm_xyzrpy[3] - xyzrpy[3])
+        diffPitch = abs(target_arm_xyzrpy[4] - xyzrpy[4])
+        diffYaw = abs(target_arm_xyzrpy[5] - xyzrpy[5])
+        print(
+                f"diffX:{diffX:.3f}, "
+                f"diffY:{diffY:.3f}, "
+                f"diffZ:{diffZ:.3f}, "
+                f"diffRoll:{diffRoll:.3f}, "
+                f"diffPitch:{diffPitch:.3f}, "
+                f"diffYaw:{diffYaw:.3f}"
+)
+
+        get_result = True
+        if diffX > 0.3 or diffY > 0.3 or diffZ > 0.3 :#or diffRoll > 1 or diffPitch > 1 or diffYaw > 1:
+            get_result = False
+            target_q = self.fk_solver.get_pose(target_arm_xyzrpy)
+            for i in range(1, 7):
+                transition["action"][f"joint_{i}.pos"] = target_q[i-1]
+            return transition
+
         for i in range(1, 7):
             transition["action"][f"joint_{i}.pos"] = sol_q[i-1]
+
         transition["action"]["gripper.pos"] = 0.0
-        # 🌟 关键：把算出来的关节角覆盖进去，完成“翻译”
-        # transition["action"]["actions"] = torch.from_numpy(sol_q).float()
-        
+
         return transition
 
-    def transform_features(self, features: dict) -> dict:
-        """
-        2. 🚨 强行修改特征声明！告诉后面的关卡：动作已经被我从 16 维洗成 6 维了！
-        """
-        # 找到动作特征里声明形状的地方，强行改成机械臂的 6 轴
-        if "action" in features and "actions" in features["action"]:
-            features["action"]["actions"].shape = (6,)
-            
+    def transform_features(
+        self, features: dict[PipelineFeatureType, dict[str, PolicyFeature]]
+    ) -> dict[PipelineFeatureType, dict[str, PolicyFeature]]:
+        """Returns the features without modification."""
         return features
