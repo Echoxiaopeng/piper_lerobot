@@ -1792,8 +1792,8 @@ class PiperIKProcessorStep(ProcessorStep):
         if self.is_first_frame:
             obs_data = transition[TransitionKey.OBSERVATION]
             current_joints = np.array([
-                obs_data['joint_1.pos'], obs_data['joint_2.pos'], obs_data['joint_3.pos'],
-                obs_data['joint_4.pos'], obs_data['joint_5.pos'], obs_data['joint_6.pos']
+                obs_data['joint1.pos'], obs_data['joint2.pos'], obs_data['joint3.pos'],
+                obs_data['joint4.pos'], obs_data['joint5.pos'], obs_data['joint6.pos']
             ])
             current_xyzrpy = self.fk_solver.get_pose(current_joints)
             self.arm_end_pose_matrix = create_transformation_matrix(*current_xyzrpy)
@@ -1817,8 +1817,8 @@ class PiperIKProcessorStep(ProcessorStep):
 
         # 逆运动学解算出 6 维关节角度弧度
         sol_q, _, _ = self.ik_solver.ik_fun(target_pose=target_arm_matrix, gripper=0.0)
-
         xyzrpy = self.ik_solver.get_pose(sol_q[:6])
+
 
         # print(f"target_arm_xyzrpy:{xyzrpy[0]:.3f}")
         diffX = abs(target_arm_xyzrpy[0] - xyzrpy[0])
@@ -1827,25 +1827,23 @@ class PiperIKProcessorStep(ProcessorStep):
         diffRoll = abs(target_arm_xyzrpy[3] - xyzrpy[3])
         diffPitch = abs(target_arm_xyzrpy[4] - xyzrpy[4])
         diffYaw = abs(target_arm_xyzrpy[5] - xyzrpy[5])
-        print(
-                f"diffX:{diffX:.3f}, "
-                f"diffY:{diffY:.3f}, "
-                f"diffZ:{diffZ:.3f}, "
-                f"diffRoll:{diffRoll:.3f}, "
-                f"diffPitch:{diffPitch:.3f}, "
-                f"diffYaw:{diffYaw:.3f}"
-)
+#         print(
+#                 f"diffX:{diffX:.3f}, "
+#                 f"diffY:{diffY:.3f}, "
+#                 f"diffZ:{diffZ:.3f}, "
+#                 f"diffRoll:{diffRoll:.3f}, "
+#                 f"diffPitch:{diffPitch:.3f}, "
+#                 f"diffYaw:{diffYaw:.3f}"
+# )
 
         get_result = True
-        if diffX > 0.3 or diffY > 0.3 or diffZ > 0.3 :#or diffRoll > 1 or diffPitch > 1 or diffYaw > 1:
-            get_result = False
-            target_q = self.fk_solver.get_pose(target_arm_xyzrpy)
-            for i in range(1, 7):
-                transition["action"][f"joint_{i}.pos"] = target_q[i-1]
-            return transition
+        # if diffX > 0.3 or diffY > 0.3 or diffZ > 0.3 :#or diffRoll > 1 or diffPitch > 1 or diffYaw > 1:
+        #     for i in range(1, 7):
+        #         transition["action"][f"joint_{i}.pos"] = sol_q[i-1]
+        #     return transition
 
         for i in range(1, 7):
-            transition["action"][f"joint_{i}.pos"] = sol_q[i-1]
+            transition["action"][f"joint{i}.pos"] = sol_q[i-1]
 
         transition["action"]["gripper.pos"] = 0.0
 

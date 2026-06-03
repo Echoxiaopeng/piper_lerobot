@@ -129,6 +129,7 @@ from lerobot.robots import (  # noqa: F401
     so_follower,
     unitree_g1 as unitree_g1_robot,
     piper_follower,
+    piper_sim_follower
 )
 from lerobot.teleoperators import (  # noqa: F401
     Teleoperator,

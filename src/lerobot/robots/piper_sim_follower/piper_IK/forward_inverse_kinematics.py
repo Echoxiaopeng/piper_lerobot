@@ -61,8 +61,14 @@ def create_transformation_matrix(x, y, z, roll, pitch, yaw):
 
 class Arm_FK:
     def __init__(self):
+        # self.args = args
+
         np.set_printoptions(precision=5, suppress=True, linewidth=200)
 
+        rospack = rospkg.RosPack()
+        # package_path = rospack.get_path('piper_description') 
+        # urdf_path = os.path.join(package_path, 'urdf', 'piper_description' + ('-lift.urdf' if args.lift else '.urdf'))
+        
         urdf_path= "/home/echo/pika_ros/install/share/piper_description/urdf/piper_description.urdf"
         package_path = "/home/echo/pika_ros/install/share/piper_description"
 
@@ -70,6 +76,8 @@ class Arm_FK:
             urdf_path,
             package_dirs=package_path
         )
+
+        # self.robot = pin.RobotWrapper.BuildFromURDF(urdf_path)
 
         self.mixed_jointsToLockIDs = ["joint7",
                                       "joint8"
@@ -80,6 +88,7 @@ class Arm_FK:
             reference_configuration=np.array([0] * self.robot.model.nq),
         )
         self.gripper_xyzrpy = [0.19, 0, 0, 0, 0, 0]
+        # self.first_matrix = create_transformation_matrix(0, 0, 0, 0, -1.57, -1.57)
         self.first_matrix = create_transformation_matrix(0, 0, 0, 0, -1.57, 0)
         self.second_matrix = create_transformation_matrix(self.gripper_xyzrpy[0], self.gripper_xyzrpy[1], self.gripper_xyzrpy[2],
                                                           self.gripper_xyzrpy[3], self.gripper_xyzrpy[4], self.gripper_xyzrpy[5])
@@ -94,26 +103,21 @@ class Arm_FK:
                       ),
                       pin.FrameType.OP_FRAME)
         )
-         
-        self.reduced_robot.data = self.reduced_robot.model.createData()
 
     def get_pose(self, q):
         index = 6
         pin.forwardKinematics(self.reduced_robot.model, self.reduced_robot.data, np.concatenate([q], axis=0))
-        print(
-            self.reduced_robot.model.getJointId("joint6")
-        )
-
-        # 得到关节6的一个转换矩阵
+        # end_pose = create_transformation_matrix(self.reduced_robot.data.oMi[index].translation[0], self.reduced_robot.data.oMi[index].translation[1], self.reduced_robot.data.oMi[index].translation[2],
+        #                                         math.atan2(self.reduced_robot.data.oMi[index].rotation[2, 1], self.reduced_robot.data.oMi[index].rotation[2, 2]),
+        #                                         math.asin(-self.reduced_robot.data.oMi[index].rotation[2, 0]),
+        #                                         math.atan2(self.reduced_robot.data.oMi[index].rotation[1, 0], self.reduced_robot.data.oMi[index].rotation[0, 0]))
+        
         T = np.eye(4)
         T[:3,:3] = self.reduced_robot.data.oMi[index].rotation
         T[:3,3]  = self.reduced_robot.data.oMi[index].translation
         end_pose = T
 
-        # 计算ee的转换矩阵
         end_pose = np.dot(end_pose, self.last_matrix)
-
-
         return matrix_to_xyzrpy(end_pose)
 
 
@@ -122,6 +126,11 @@ class Arm_IK:
         # self.args = args
         np.set_printoptions(precision=5, suppress=True, linewidth=200)
 
+        # rospack = rospkg.RosPack()
+        # package_path = rospack.get_path('piper_description') 
+        # urdf_path = os.path.join(package_path, 'urdf', 'piper_description' + ('-lift.urdf' if args.lift else '.urdf'))
+
+
         urdf_path = "/home/echo/pika_ros/install/share/piper_description/urdf/piper_description.urdf"
         package_path = "/home/echo/pika_ros/install/share/piper_description"
 
@@ -129,6 +138,7 @@ class Arm_IK:
             urdf_path,
             package_dirs=package_path
         )
+        # self.robot = pin.RobotWrapper.BuildFromURDF(urdf_path)
 
         self.mixed_jointsToLockIDs = ["joint7",
                                       "joint8"
@@ -144,22 +154,17 @@ class Arm_IK:
         self.second_matrix = create_transformation_matrix(self.gripper_xyzrpy[0], self.gripper_xyzrpy[1], self.gripper_xyzrpy[2],
                                                           self.gripper_xyzrpy[3], self.gripper_xyzrpy[4], self.gripper_xyzrpy[5])
         self.last_matrix = np.dot(self.first_matrix, self.second_matrix)
-        # 这里输出的四元数是 w x y z
         q = quaternion_from_matrix(self.last_matrix)
-
         self.reduced_robot.model.addFrame(
             pin.Frame('ee',
                       self.reduced_robot.model.getJointId('joint6'),
                       pin.SE3(
                           # pin.Quaternion(1, 0, 0, 0),
-                        #   pin.Quaternion(q[3], q[0], q[1], q[2]),
-                        # pin.Quaternion 接受的是w x y z
-                          pin.Quaternion(q[0], q[1], q[2], q[3]),
+                          pin.Quaternion(q[3], q[0], q[1], q[2]),
                           np.array([self.last_matrix[0, 3], self.last_matrix[1, 3], self.last_matrix[2, 3]]),  # -y
                       ),
                       pin.FrameType.OP_FRAME)
         )
-
 
         self.geom_model = pin.buildGeomFromUrdf(self.robot.model, urdf_path, pin.GeometryType.COLLISION)
         for i in range(4, 10):
@@ -181,7 +186,6 @@ class Arm_IK:
         cpin.framesForwardKinematics(self.cmodel, self.cdata, self.cq)
 
         # # Get the hand joint ID and define the error function
-        # 得到ee frame的id值 20
         self.gripper_id = self.reduced_robot.model.getFrameId("ee")
         self.error = casadi.Function(
             "error",
@@ -189,8 +193,6 @@ class Arm_IK:
             [
                 casadi.vertcat(
                     cpin.log6(
-                        # oMf 末端 "ee" Frame 的位姿。
-                        # cTf 目标位姿
                         self.cdata.oMf[self.gripper_id].inverse() * cpin.SE3(self.cTf)
                     ).vector,
                 )
@@ -200,7 +202,11 @@ class Arm_IK:
         # Defining the optimization problem
         self.opti = casadi.Opti()
         self.var_q = self.opti.variable(self.reduced_robot.model.nq)
+        # self.var_q_last = self.opti.parameter(self.reduced_robot.model.nq)   # for smooth
         self.param_tf = self.opti.parameter(4, 4)
+
+        # self.totalcost = casadi.sumsqr(self.error(self.var_q, self.param_tf))
+        # self.regularization = casadi.sumsqr(self.var_q)
 
         error_vec = self.error(self.var_q, self.param_tf)
         pos_error = error_vec[:3]  # 取前3个值为位置误差
@@ -213,14 +219,19 @@ class Arm_IK:
         # 正则化项
         self.regularization = casadi.sumsqr(self.var_q)
 
+        # self.smooth_cost = casadi.sumsqr(self.var_q - self.var_q_last) # for smooth
+
         # Setting optimization constraints and goals
         self.opti.subject_to(self.opti.bounded(
             self.reduced_robot.model.lowerPositionLimit,
             self.var_q,
             self.reduced_robot.model.upperPositionLimit)
         )
-    
+        # print("self.reduced_robot.model.lowerPositionLimit:", self.reduced_robot.model.lowerPositionLimit)
+        # print("self.reduced_robot.model.upperPositionLimit:", self.reduced_robot.model.upperPositionLimit)
         self.opti.minimize(20 * self.totalcost + 0.01 * self.regularization)
+        # self.opti.minimize(20 * self.totalcost + 0.01 * self.regularization + 0.1 * self.smooth_cost) # for smooth
+
         opts = {
             'ipopt': {
                 'print_level': 0,
@@ -238,11 +249,14 @@ class Arm_IK:
         self.opti.set_initial(self.var_q, self.init_data)
 
         self.opti.set_value(self.param_tf, target_pose)
+        # self.opti.set_value(self.var_q_last, self.init_data) # for smooth
 
         try:
+            # sol = self.opti.solve()
             sol = self.opti.solve_limited()
             sol_q = self.opti.value(self.var_q)
 
+            # self.init_data = np.zeros(self.reduced_robot.model.nq)
             if self.init_data is not None:
                 max_diff = max(abs(self.history_data - sol_q))
 
@@ -255,7 +269,7 @@ class Arm_IK:
 
             self.history_data = sol_q
 
-
+            # self.vis.display(sol_q)  # for visualization
 
             if motorV is not None:
                 v = motorV * 0.0
@@ -309,7 +323,7 @@ def main():
     ik_solver = Arm_IK()
 
     # 给一组测试关节角（假设 6 个自由度）
-    target_joint = np.array([0,0, 0, 0, 0, 0]) 
+    target_joint = np.array([0.1, -0.2, 0.3, 0.1, 0.5, -0.1]) 
     
     # 1. 获取目标位姿
     xyzrpy = fk_solver.get_pose(target_joint)
@@ -360,5 +374,7 @@ if __name__ == '__main__':
     main()
 
 
+if __name__ == '__main__':
+    main()
 
 

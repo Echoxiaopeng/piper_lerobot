@@ -86,6 +86,7 @@ from lerobot.robots import (  # noqa: F401
     so_follower,
     unitree_g1 as unitree_g1_robot,
     piper_follower,
+    piper_sim_follower,
 )
 from lerobot.teleoperators import (  # noqa: F401
     Teleoperator,
@@ -166,6 +167,8 @@ def teleop_loop(
         # Not really needed for now other than for visualization
         # teleop_action_processor can take None as an observation
         # given that it is the identity processor as default
+
+        # {'joint1.pos': 0.0, 'joint2.pos': 0.0, 'joint3.pos': 0.0, 'joint4.pos': 0.0, 'joint5.pos': 0.0, 'joint6.pos': 0.0, 'gripper.pos': 0.0}
         obs = robot.get_observation()
 
         if robot.name == "unitree_g1":
@@ -173,9 +176,10 @@ def teleop_loop(
 
         # Get teleop action
         raw_action = teleop.get_action()
-        print(f"pika raw_action:{raw_action["pika.pos"]}")
+        # print(f"pika raw_action:{raw_action["pika.pos"]}")
         # Process teleop action through pipeline
         teleop_action = teleop_action_processor((raw_action, obs))
+        # print(f"pika gripper:{raw_action["pika.gripper"]}")
 
         # Process action for robot through pipeline
         robot_action_to_send = robot_action_processor((teleop_action, obs))
@@ -204,7 +208,7 @@ def teleop_loop(
         dt_s = time.perf_counter() - loop_start
         precise_sleep(max(1 / fps - dt_s, 0.0))
         loop_s = time.perf_counter() - loop_start
-        print(f"Teleop loop time: {loop_s * 1e3:.2f}ms ({1 / loop_s:.0f} Hz)")
+        # print(f"Teleop loop time: {loop_s * 1e3:.2f}ms ({1 / loop_s:.0f} Hz)")
         move_cursor_up(1)
 
         if duration is not None and time.perf_counter() - start >= duration:

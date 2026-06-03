@@ -16,8 +16,14 @@ class piper_control:
         except AttributeError:
             self.actuator_id = [mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, name) for name in self.actuator_name]
         
+        self.joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7", "joint8"]
+        try:
+            self.joint_ids = [mujoco.mj_name2id(self.model, mujoco.mjtObj.mqT_JOINT, name) for name in self.joint_names]
+        except AttributeError:
+            self.joint_ids = [mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name) for name in self.joint_names]
+    
     def jont_control(self, joint):
-        # 💡 修正 1：只取前 6 个关节，扔掉第 7 个总宽度位置，防止数组变成 9 维
+        # 修正 1：只取前 6 个关节，扔掉第 7 个总宽度位置，防止数组变成 9 维
         self.mj_control_joint = list(joint[:6])
 
         gripper = joint[6]
@@ -30,17 +36,35 @@ class piper_control:
         self.mj_control_joint.append(gripper_right)
         
         for i in range(self.model.nu):
-            actuator_id = self.actuator_id[i]
-            ctrl_range = self.model.actuator_ctrlrange[actuator_id]
+            joint_ids = self.joint_ids[i]
+            ctrl_range = self.model.actuator_ctrlrange[joint_ids]
 
-            # 💡 修正 2：只对当前这单个通道的数值进行 clip 限制
+            # 修正 2：只对当前这单个通道的数值进行 clip 限制
             safe_val = np.clip(self.mj_control_joint[i], ctrl_range[0], ctrl_range[1])
-            self.data.ctrl[actuator_id] = safe_val
+            self.data.ctrl[joint_ids] = safe_val
 
+    def read_joint(self):
+        result = {"joint1":0, "joint2":0, "joint3":0, "joint4":0, "joint5":0, "joint6":0, "gripper":0}
+        for i in range(6):
+            j_id = self.joint_ids[i]
+
+            result[f"joint{i+1}"] = self.data.qpos[j_id]
+
+        gripper_left = self.data.qpos[self.joint_ids[6]]
+        gripper_right = self.data.qpos[self.joint_ids[7]]
+        gripper = gripper_left - gripper_right
+        result["gripper"] = gripper
+
+        return result
+
+    def is_connect(self):    
+        if self.model is not None and self.data is not None:
+            return True
+        return False
 
 if __name__ == "__main__":
     # 1. 加载模型与数据
-    model = mujoco.MjModel.from_xml_path('/home/echo/lerobot/mujoco/mujoco_model/piper_description.xml')
+    model = mujoco.MjModel.from_xml_path('/home/echo/lerobot/mujoco_sim/mujoco_model/piper_description.xml')
     data = mujoco.MjData(model)
 
     piper = piper_control(model, data)
@@ -79,3 +103,4 @@ if __name__ == "__main__":
             
             # 切换到下一个姿态
             pose_idx = (pose_idx + 1) % len(poses)
+            piper.read_joint()

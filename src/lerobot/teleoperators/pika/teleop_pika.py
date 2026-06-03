@@ -107,6 +107,7 @@ class PikaTeleop(Teleoperator):
     def get_action(self) -> RobotAction:
             pose_data = self.pika.get_pose("T20")
             gripper = self.sense_gripper.get_gripper_distance()
+            print(f"gripper distance:{gripper}")
             if pose_data is None:
                 return {"pika.pos": np.zeros(3), "pika.rot": np.array([0,0,0,1]), "pika.timestamp": time.time(),"pika.gripper": 0}
             
